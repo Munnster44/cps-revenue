@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CanBoat Membership Financial Management System</title>
+<style>
+:root{
+  --red:#b30000; --dark:#222; --light:#f4f6f8; --line:#d7dce2;
+  --green:#176b3a; --blue:#174d8a; --amber:#8a5a00; --purple:#6b3fa0;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--light);color:var(--dark)}
+header{background:#fff;border-bottom:5px solid var(--red);padding:18px 24px}
+header h1{margin:0;color:var(--red);font-size:1.7rem}
+header p{margin:6px 0 0;color:#555}
+main{max-width:1450px;margin:20px auto;padding:0 16px 30px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:18px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+input[type=file]{padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:310px}
+button{border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:pointer}
+button.primary{background:var(--red);color:#fff}
+button.secondary{background:#e8edf3;color:#222}
+button.print{background:#333;color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+.status{margin-top:12px;padding:10px 12px;border-radius:8px;background:#eef3f7;min-height:40px}
+.note{font-size:.9rem;color:#555;line-height:1.5}
+.warn{color:#8b1a1a;font-weight:700}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.tab-btn{background:#e8edf3;color:#222;border:1px solid var(--line)}
+.tab-btn.active{background:var(--red);color:#fff;border-color:var(--red)}
+.tab-page{display:none}
+.tab-page.active{display:block}
+.cards{display:grid;grid-template-columns:repeat(5,minmax(170px,1fr));gap:12px;margin-bottom:18px}
+.card{border:1px solid var(--line);border-radius:10px;padding:14px;background:#fff}
+.card .label{font-size:.84rem;color:#555}
+.card .value{font-size:1.45rem;font-weight:800;margin-top:6px}
+.money .value{color:var(--green)}
+.life .value{color:var(--blue)}
+.outstanding .value{color:var(--amber)}
+.expired .value{color:var(--red)}
+.excluded .value{color:var(--purple)}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}
+.chart-box{border:1px solid var(--line);border-radius:10px;padding:14px;min-height:320px}
+.chart-box h3{margin-top:0}
+.chart-wrap{height:270px}
+.table-wrap{max-height:530px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;margin:12px 0 20px}
+th,td{border:1px solid var(--line);padding:8px 9px;text-align:left;white-space:nowrap}
+th{background:#f0f3f6;position:sticky;top:0;z-index:1}
+tfoot th{background:#e9edf2}
+.num{text-align:right}
+.hidden{display:none}
+.countline{margin:8px 0 12px;color:#555;font-weight:700}
+.report-title{display:none}
+footer{text-align:center;color:#666;font-size:.85rem;padding:14px}
+@media(max-width:1100px){.cards{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}}
+@media(max-width:520px){.cards{grid-template-columns:1fr}.controls{align-items:stretch}button,input[type=file]{width:100%}}
+@media print{
+  body{background:#fff}
+  header,.controls,.status,.note,.tabs,footer{display:none!important}
+  main{max-width:none;margin:0;padding:0}
+  .panel{box-shadow:none;border:0;padding:0}
+  #resultsPanel{display:block!important}
+  .tab-page{display:none!important}
+  #summaryTab{display:block!important}
+  .report-title{display:block;margin-bottom:14px}
+  .cards{grid-template-columns:repeat(5,1fr)}
+  .charts{grid-template-columns:1fr 1fr}
+  .chart-box{break-inside:avoid}
+  table{font-size:9pt}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>CanBoat Membership Financial Management System</h1>
+  <p>Production Dashboard — Current, Outstanding, Expired, Life Member and Revenue Distribution Analysis</p>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="controls">
+      <input id="fileInput" type="file" accept=".csv,.xlsx,.xls">
+      <button id="processBtn" class="primary">Load and Calculate</button>
+      <button id="excelBtn" class="secondary" disabled>Save Results as Excel</button>
+      <button id="printBtn" class="print" disabled>Print Executive Summary</button>
+      <button id="resetBtn" class="secondary">Reset</button>
+    </div>
+    <div id="status" class="status">Select a CSV or Excel membership file.</div>
+    <p class="note">
+      Required columns: <strong>Membership Type</strong>, <strong>Family Role</strong>, and <strong>Next Payment Date</strong>.
+      Rules: today or later = current revenue; 1–30 days overdue = outstanding and zero current revenue;
+      31+ days overdue = expired and zero current revenue; REGULAR_LIFE = zero revenue. Active Members = REGULAR and REGULAR_LIFE with a Next Payment Date of today or later.
+    </p>
+  </section>
+
+  <section id="resultsPanel" class="panel hidden">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="summaryTab">Summary</button>
+      <button class="tab-btn" data-tab="regularTab">Current Regular</button>
+      <button class="tab-btn" data-tab="familyHeadTab">Current Family_Head</button>
+      <button class="tab-btn" data-tab="otherTab">Current Other</button>
+      <button class="tab-btn" data-tab="outstandingTab">Outstanding 1–30 Days</button>
+      <button class="tab-btn" data-tab="expiredTab">Expired 31+ Days</button>
+      <button class="tab-btn" data-tab="lifeTab">Regular Life</button>
+      <button class="tab-btn" data-tab="districtTab">District Summary</button>
+      <button class="tab-btn" data-tab="squadronTab">Squadron Summary</button>
+      <button class="tab-btn" data-tab="excludedTab">Excluded</button>
+    </div>
+
+    <div id="summaryTab" class="tab-page active">
+      <div class="report-title">
+        <h1>CanBoat / NautiSavoir Membership Financial Summary</h1>
+        <p id="printDate"></p>
+      </div>
+
+      <h2>Executive Summary</h2>
+      <div class="cards">
+        <div class="card"><div class="label">Total Records</div><div id="totalRecords" class="value">0</div></div>
+        <div class="card money"><div class="label">Active Members</div><div id="activeMemberCount" class="value">0</div></div>
+        <div class="card money"><div class="label">Current Revenue Members</div><div id="currentCount" class="value">0</div></div>
+        <div class="card outstanding"><div class="label">Outstanding Members</div><div id="outstandingCount" class="value">0</div></div>
+        <div class="card expired"><div class="label">Expired Members</div><div id="expiredCount" class="value">0</div></div>
+        <div class="card life"><div class="label">Regular Life Members</div><div id="lifeCount" class="value">0</div></div>
+
+        <div class="card"><div class="label">Current Regular $60</div><div id="regularCount" class="value">0</div></div>
+        <div class="card"><div class="label">Current Family_Head $60</div><div id="familyHeadCount" class="value">0</div></div>
+        <div class="card"><div class="label">Current Other $30</div><div id="otherCount" class="value">0</div></div>
+        <div class="card money"><div class="label">Current Revenue</div><div id="currentRevenue" class="value">$0.00</div></div>
+        <div class="card outstanding"><div class="label">Outstanding Potential</div><div id="outstandingPotential" class="value">$0.00</div></div>
+
+        <div class="card expired"><div class="label">Expired Revenue Lost</div><div id="expiredPotential" class="value">$0.00</div></div>
+        <div class="card money"><div class="label">Total Potential Revenue</div><div id="totalPotential" class="value">$0.00</div></div>
+        <div class="card money" style="background:#eaf7ea;border:2px solid #176b3a;"><div class="label"><strong>Net Actual Revenue</strong></div><div id="netActualRevenue" class="value">$0.00</div></div>
+        <div class="card excluded"><div class="label">Excluded Records</div><div id="excludedCount" class="value">0</div></div>
+      </div>
+
+      <h3>Membership Calculation Summary</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th class="num">Member Count</th>
+            <th class="num">% of Total</th>
+            <th class="num">Current Revenue</th>
+            <th class="num">Potential Revenue</th>
+          </tr>
+        </thead>
+        <tbody id="summaryBody"></tbody>
+        <tfoot>
+          <tr>
+            <th>Total</th>
+            <th id="summaryTotalCount" class="num">0</th>
+            <th class="num">100.00%</th>
+            <th id="summaryCurrentRevenue" class="num">$0.00</th>
+            <th id="summaryPotentialRevenue" class="num">$0.00</th>
+          </tr>
+        </tfoot>
+      </table>
+
+      <table>
+        <tbody>
+          <tr style="font-weight:bold;background:#eaf7ea;border-top:2px solid #176b3a;border-bottom:2px solid #176b3a;">
+            <td>Net Actual Revenue</td>
+            <td class="num" colspan="3">Current Revenue only — excludes Outstanding and Expired Potential</td>
+            <td id="netActualSummary" class="num">$0.00</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Revenue Distribution Summary</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Revenue Type</th>
+            <th class="num">Members</th>
+            <th class="num">Gross Revenue</th>
+            <th class="num">Squadron</th>
+            <th class="num">District</th>
+            <th class="num">National HQ</th>
+          </tr>
+        </thead>
+        <tbody id="splitBody"></tbody>
+        <tfoot>
+          <tr>
+            <th>Total Potential</th>
+            <th id="splitMembers" class="num">0</th>
+            <th id="splitGross" class="num">$0.00</th>
+            <th id="splitSquadron" class="num">$0.00</th>
+            <th id="splitDistrict" class="num">$0.00</th>
+            <th id="splitNational" class="num">$0.00</th>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="charts">
+        <div class="chart-box">
+          <h3>Membership Distribution</h3>
+          <div class="chart-wrap"><canvas id="memberChart"></canvas></div>
+        </div>
+        <div class="chart-box">
+          <h3>Revenue and Potential Revenue</h3>
+          <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="regularTab" class="tab-page"><h2>Current Regular Members — $60</h2><div id="regularCountLine" class="countline"></div><div class="table-wrap"><table><thead id="regularHead"></thead><tbody id="regularBody"></tbody></table></div></div>
+    <div id="familyHeadTab" class="tab-page"><h2>Current Regular Family_Head Members — $60</h2><div id="familyHeadCountLine" class="countline"></div><div class="table-wrap"><table><thead id="familyHeadHead"></thead><tbody id="familyHeadBody"></tbody></table></div></div>
+    <div id="otherTab" class="tab-page"><h2>Current Regular Other Members — $30</h2><div id="otherCountLine" class="countline"></div><div class="table-wrap"><table><thead id="otherHead"></thead><tbody id="otherBody"></tbody></table></div></div>
+    <div id="outstandingTab" class="tab-page"><h2>Outstanding Members — 1 to 30 Days Overdue — Zero Current Revenue</h2><div id="outstandingCountLine" class="countline"></div><div class="table-wrap"><table><thead id="outstandingHead"></thead><tbody id="outstandingBody"></tbody></table></div></div>
+    <div id="expiredTab" class="tab-page"><h2>Expired Members — 31+ Days Overdue — Zero Current Revenue</h2><div id="expiredCountLine" class="countline"></div><div class="table-wrap"><table><thead id="expiredHead"></thead><tbody id="expiredBody"></tbody></table></div></div>
+    <div id="lifeTab" class="tab-page"><h2>Regular Life Members — Zero Revenue</h2><div id="lifeCountLine" class="countline"></div><div class="table-wrap"><table><thead id="lifeHead"></thead><tbody id="lifeBody"></tbody></table></div></div>
+    
+    <div id="districtTab" class="tab-page">
+      <h2>District Financial Summary</h2>
+      <div class="countline">Current revenue, outstanding potential, expired potential, and organizational revenue splits by District.</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>District</th>
+              <th class="num">Active Members</th>
+              <th class="num">Current Members</th>
+              <th class="num">Outstanding</th>
+              <th class="num">Expired</th>
+              <th class="num">Regular Life</th>
+              <th class="num">Current Revenue</th>
+              <th class="num">Outstanding Potential</th>
+              <th class="num">Expired Potential</th>
+              <th class="num">Squadron Share</th>
+              <th class="num">District Share</th>
+              <th class="num">National HQ Share</th>
+            </tr>
+          </thead>
+          <tbody id="districtSummaryBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="squadronTab" class="tab-page">
+      <h2>Squadron Financial Summary</h2>
+      <div class="countline">Current revenue, outstanding potential, expired potential, and organizational revenue splits by Squadron.</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>District</th>
+              <th>Squadron</th>
+              <th class="num">Active Members</th>
+              <th class="num">Current Members</th>
+              <th class="num">Outstanding</th>
+              <th class="num">Expired</th>
+              <th class="num">Regular Life</th>
+              <th class="num">Current Revenue</th>
+              <th class="num">Outstanding Potential</th>
+              <th class="num">Expired Potential</th>
+              <th class="num">Squadron Share</th>
+              <th class="num">District Share</th>
+              <th class="num">National HQ Share</th>
+            </tr>
+          </thead>
+          <tbody id="squadronSummaryBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="excludedTab" class="tab-page"><h2>Excluded or Unrecognized Records</h2><div id="excludedCountLine" class="countline"></div><div class="table-wrap"><table><thead id="excludedHead"></thead><tbody id="excludedBody"></tbody></table></div></div>
+  </section>
+</main>
+
+<footer>© 2026 Glen Carruthers. CanBoat Membership Financial Management System v3.4 Production. All Rights Reserved.</footer>
+
+<script>
+let sourceRows=[],sourceHeaders=[],processedRows=[];
+let memberChart=null,revenueChart=null;
+const $=id=>document.getElementById(id);
+const money=n=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(n);
+const pct=(n,t)=>t?((n/t)*100).toFixed(2)+'%':'0.00%';
+
+function normalize(v){return String(v??'').trim().replace(/[_-]+/g,' ').replace(/\s+/g,' ').toLowerCase()}
+function cleanHeader(v){return String(v??'').replace(/^\uFEFF/,'').trim()}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function findHeader(headers,wanted){const t=normalize(wanted);return headers.find(h=>normalize(h)===t)}
+
+function parseCSV(text){
+  const rows=[];let row=[],field='',quote=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i],n=text[i+1];
+    if(c==='"'){if(quote&&n==='"'){field+='"';i++}else quote=!quote}
+    else if(c===','&&!quote){row.push(field);field=''}
+    else if((c==='\n'||c==='\r')&&!quote){
+      if(c==='\r'&&n==='\n')i++;
+      row.push(field);field='';
+      if(row.some(x=>x!==''))rows.push(row);
+      row=[];
+    }else field+=c;
+  }
+  if(field!==''||row.length){row.push(field);rows.push(row)}
+  if(!rows.length)return[];
+  const headers=rows[0].map(cleanHeader);
+  return rows.slice(1).map(r=>{const o={};headers.forEach((h,i)=>o[h]=r[i]??'');return o});
+}
+function parseDateValue(value){
+  const raw=String(value??'').trim();
+  if(!raw)return null;
+  let d=new Date(raw);
+  if(!Number.isNaN(d.getTime()))return new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const p=raw.split(/[\/\-]/).map(x=>x.trim());
+  if(p.length===3){
+    let y,m,day;
+    if(p[0].length===4){y=+p[0];m=+p[1]-1;day=+p[2]}
+    else{m=+p[0]-1;day=+p[1];y=+p[2];if(m>11){day=+p[0];m=+p[1]-1}}
+    d=new Date(y,m,day);
+    if(!Number.isNaN(d.getTime()))return d;
+  }
+  return null;
+}
+function loadScript(src,globalName){
+  return new Promise((resolve,reject)=>{
+    if(window[globalName])return resolve();
+    const s=document.createElement('script');
+    s.src=src;s.onload=resolve;s.onerror=()=>reject(new Error(globalName+' support could not be loaded.'));
+    document.head.appendChild(s);
+  });
+}
+async function loadSheetJS(){await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js','XLSX')}
+async function loadChartJS(){await loadScript('https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js','Chart')}
+async function readFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext==='csv')return parseCSV(await file.text());
+  if(ext==='xlsx'||ext==='xls'){
+    await loadSheetJS();
+    const data=await file.arrayBuffer();
+    const wb=XLSX.read(data,{type:'array',cellDates:false});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws,{defval:'',raw:false});
+  }
+  throw new Error('Unsupported file type. Use CSV, XLSX, or XLS.');
+}
+function classify(row,membershipHeader,familyHeader,dateHeader){
+  const mt=normalize(row[membershipHeader]);
+  const fr=normalize(row[familyHeader]);
+  const nextDate=parseDateValue(row[dateHeader]);
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+
+  if(mt==='regular life'||mt==='life member'){
+    return {category:'Regular Life',status:'Life',rate:0,revenue:0,potential:0,daysOverdue:0};
+  }
+  if(mt!=='regular'){
+    return {category:'Excluded',status:'Excluded',rate:0,revenue:0,potential:0,daysOverdue:0};
+  }
+
+  const rate=fr==='other'?30:60;
+  let currentCategory='Current Regular';
+  if(fr==='family head')currentCategory='Current Family Head';
+  else if(fr==='other')currentCategory='Current Other';
+
+  if(!nextDate){
+    return {category:'Excluded',status:'Invalid Date',rate:0,revenue:0,potential:0,daysOverdue:''};
+  }
+
+  const dayMs=86400000;
+  const daysOverdue=Math.floor((today-nextDate)/dayMs);
+
+  if(daysOverdue<=0){
+    return {category:currentCategory,status:'Current',rate,revenue:rate,potential:0,daysOverdue:0};
+  }
+  if(daysOverdue<=30){
+    return {category:'Outstanding',status:'Outstanding',rate:0,revenue:0,potential:rate,daysOverdue};
+  }
+  return {category:'Expired',status:'Expired',rate:0,revenue:0,potential:rate,daysOverdue};
+}
+function detailHeaders(){return [...sourceHeaders,'Calculated Category','Status','Days Overdue','Rate','Current Revenue','Potential Revenue']}
+function tableHead(){return '<tr>'+detailHeaders().map(h=>`<th>${escapeHtml(h)}</th>`).join('')+'</tr>'}
+function tableRows(rows){
+  return rows.slice(0,10000).map(r=>'<tr>'+
+    sourceHeaders.map(h=>`<td>${escapeHtml(r[h])}</td>`).join('')+
+    `<td>${escapeHtml(r._category)}</td><td>${escapeHtml(r._status)}</td><td class="num">${escapeHtml(r._daysOverdue)}</td><td class="num">${money(r._rate)}</td><td class="num">${money(r._revenue)}</td><td class="num">${money(r._potential)}</td></tr>`
+  ).join('');
+}
+function renderCategory(prefix,rows){
+  $(prefix+'Head').innerHTML=tableHead();
+  $(prefix+'Body').innerHTML=tableRows(rows);
+  $(prefix+'CountLine').textContent=`${rows.length.toLocaleString()} records`;
+}
+function splitFor(count60,count30){
+  const gross=count60*60+count30*30;
+  const squad=count60*10+count30*5;
+  const district=count60*5+count30*2.5;
+  return {members:count60+count30,gross,squad,district,national:gross-squad-district};
+}
+async function renderCharts(labels,counts,revLabels,revValues){
+  try{
+    await loadChartJS();
+    if(memberChart)memberChart.destroy();
+    if(revenueChart)revenueChart.destroy();
+    memberChart=new Chart($('memberChart'),{type:'pie',data:{labels,datasets:[{data:counts}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+    revenueChart=new Chart($('revenueChart'),{type:'bar',data:{labels:revLabels,datasets:[{label:'CAD',data:revValues}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+Number(v).toLocaleString()}}},plugins:{legend:{display:false}}}});
+  }catch(e){console.warn(e)}
+}
+
+function buildOrgSummaries(){
+  const districtHeader=sourceHeaders.find(h=>normalize(h)==='district');
+  const squadronHeader=sourceHeaders.find(h=>normalize(h)==='squadron');
+  const membershipHeader=sourceHeaders.find(h=>normalize(h)==='membership type');
+  const dateHeader=sourceHeaders.find(h=>normalize(h)==='next payment date');
+
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+
+  function activeFlag(r){
+    const mt=normalize(r[membershipHeader]);
+    const d=parseDateValue(r[dateHeader]);
+    return (mt==='regular'||mt==='regular life'||mt==='life member') && d && d>=today;
+  }
+  function emptySummary(name,district=''){
+    return {
+      name,district,
+      active:0,current:0,outstanding:0,expired:0,life:0,
+      currentRevenue:0,outstandingPotential:0,expiredPotential:0,
+      squadronShare:0,districtShare:0,nationalShare:0
+    };
+  }
+  function addRecord(s,r){
+    if(activeFlag(r))s.active++;
+    if(r._category==='Current Regular'||r._category==='Current Family Head'||r._category==='Current Other'){
+      s.current++;
+      s.currentRevenue+=r._revenue;
+      if(r._revenue===60){s.squadronShare+=10;s.districtShare+=5;s.nationalShare+=45}
+      else if(r._revenue===30){s.squadronShare+=5;s.districtShare+=2.5;s.nationalShare+=22.5}
+    }else if(r._category==='Outstanding'){
+      s.outstanding++;
+      s.outstandingPotential+=r._potential;
+    }else if(r._category==='Expired'){
+      s.expired++;
+      s.expiredPotential+=r._potential;
+    }else if(r._category==='Regular Life'){
+      s.life++;
+    }
+  }
+
+  const districtMap=new Map();
+  const squadronMap=new Map();
+
+  processedRows.forEach(r=>{
+    const district=String(r[districtHeader]??'').trim()||'(Blank District)';
+    const squadron=String(r[squadronHeader]??'').trim()||'(Blank Squadron)';
+
+    if(!districtMap.has(district))districtMap.set(district,emptySummary(district));
+    addRecord(districtMap.get(district),r);
+
+    const key=district+'||'+squadron;
+    if(!squadronMap.has(key))squadronMap.set(key,emptySummary(squadron,district));
+    addRecord(squadronMap.get(key),r);
+  });
+
+  return {
+    districts:[...districtMap.values()].sort((a,b)=>a.name.localeCompare(b.name)),
+    squadrons:[...squadronMap.values()].sort((a,b)=>a.district.localeCompare(b.district)||a.name.localeCompare(b.name))
+  };
+}
+function renderOrgSummaries(){
+  const {districts,squadrons}=buildOrgSummaries();
+
+  $('districtSummaryBody').innerHTML=districts.map(s=>`
+    <tr>
+      <td>${escapeHtml(s.name)}</td>
+      <td class="num">${s.active.toLocaleString()}</td>
+      <td class="num">${s.current.toLocaleString()}</td>
+      <td class="num">${s.outstanding.toLocaleString()}</td>
+      <td class="num">${s.expired.toLocaleString()}</td>
+      <td class="num">${s.life.toLocaleString()}</td>
+      <td class="num">${money(s.currentRevenue)}</td>
+      <td class="num">${money(s.outstandingPotential)}</td>
+      <td class="num">${money(s.expiredPotential)}</td>
+      <td class="num">${money(s.squadronShare)}</td>
+      <td class="num">${money(s.districtShare)}</td>
+      <td class="num">${money(s.nationalShare)}</td>
+    </tr>`).join('');
+
+  $('squadronSummaryBody').innerHTML=squadrons.map(s=>`
+    <tr>
+      <td>${escapeHtml(s.district)}</td>
+      <td>${escapeHtml(s.name)}</td>
+      <td class="num">${s.active.toLocaleString()}</td>
+      <td class="num">${s.current.toLocaleString()}</td>
+      <td class="num">${s.outstanding.toLocaleString()}</td>
+      <td class="num">${s.expired.toLocaleString()}</td>
+      <td class="num">${s.life.toLocaleString()}</td>
+      <td class="num">${money(s.currentRevenue)}</td>
+      <td class="num">${money(s.outstandingPotential)}</td>
+      <td class="num">${money(s.expiredPotential)}</td>
+      <td class="num">${money(s.squadronShare)}</td>
+      <td class="num">${money(s.districtShare)}</td>
+      <td class="num">${money(s.nationalShare)}</td>
+    </tr>`).join('');
+}
+
+async function renderAll(){
+  const regular=processedRows.filter(r=>r._category==='Current Regular');
+  const family=processedRows.filter(r=>r._category==='Current Family Head');
+  const other=processedRows.filter(r=>r._category==='Current Other');
+  const outstanding=processedRows.filter(r=>r._category==='Outstanding');
+  const expired=processedRows.filter(r=>r._category==='Expired');
+  const life=processedRows.filter(r=>r._category==='Regular Life');
+  const excluded=processedRows.filter(r=>r._category==='Excluded');
+
+  const total=processedRows.length;
+  const activeMembers=processedRows.filter(r=>{
+    const mt=normalize(r[sourceHeaders.find(h=>normalize(h)==='membership type')]);
+    const dateHeader=sourceHeaders.find(h=>normalize(h)==='next payment date');
+    const d=parseDateValue(r[dateHeader]);
+    const now=new Date();
+    const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    return (mt==='regular'||mt==='regular life'||mt==='life member') && d && d>=today;
+  });
+  const currentRevenue=[...regular,...family,...other].reduce((s,r)=>s+r._revenue,0);
+  const outstandingPotential=outstanding.reduce((s,r)=>s+r._potential,0);
+  const expiredPotential=expired.reduce((s,r)=>s+r._potential,0);
+  const totalPotential=currentRevenue+outstandingPotential+expiredPotential;
+  const netActualRevenue=currentRevenue;
+  const currentCount=regular.length+family.length+other.length;
+
+  $('totalRecords').textContent=total.toLocaleString();
+  $('activeMemberCount').textContent=activeMembers.length.toLocaleString();
+  $('currentCount').textContent=currentCount.toLocaleString();
+  $('outstandingCount').textContent=outstanding.length.toLocaleString();
+  $('expiredCount').textContent=expired.length.toLocaleString();
+  $('lifeCount').textContent=life.length.toLocaleString();
+  $('regularCount').textContent=regular.length.toLocaleString();
+  $('familyHeadCount').textContent=family.length.toLocaleString();
+  $('otherCount').textContent=other.length.toLocaleString();
+  $('currentRevenue').textContent=money(currentRevenue);
+  $('outstandingPotential').textContent=money(outstandingPotential);
+  $('expiredPotential').textContent=money(expiredPotential);
+  $('totalPotential').textContent=money(totalPotential);
+  $('netActualRevenue').textContent=money(netActualRevenue);
+  $('netActualSummary').textContent=money(netActualRevenue);
+  $('excludedCount').textContent=excluded.length.toLocaleString();
+  $('summaryTotalCount').textContent=total.toLocaleString();
+  $('summaryCurrentRevenue').textContent=money(currentRevenue);
+  $('summaryPotentialRevenue').textContent=money(outstandingPotential+expiredPotential);
+  $('printDate').textContent='Prepared: '+new Date().toLocaleString('en-CA');
+
+  const rows=[
+    ['<strong>Active Members (REGULAR + REGULAR_LIFE, today or later)</strong>',activeMembers.length,currentRevenue,0,true],
+    ['Current Regular',regular.length,regular.reduce((s,r)=>s+r._revenue,0),0],
+    ['Current Family_Head',family.length,family.reduce((s,r)=>s+r._revenue,0),0],
+    ['Current Other',other.length,other.reduce((s,r)=>s+r._revenue,0),0],
+    ['Outstanding 1–30 Days',outstanding.length,0,outstandingPotential],
+    ['Expired 31+ Days',expired.length,0,expiredPotential],
+    ['Regular Life',life.length,0,0],
+    ['Excluded',excluded.length,0,0]
+  ];
+  $('summaryBody').innerHTML=rows.map(r=>{
+  const style = r[4] ? ' style="font-weight:bold;background:#eaf7ea;border-top:2px solid #2f7d32;border-bottom:2px solid #2f7d32;"' : '';
+  return `<tr${style}><td>${r[0]}</td><td class="num">${r[1].toLocaleString()}</td><td class="num">${pct(r[1],total)}</td><td class="num">${money(r[2])}</td><td class="num">${money(r[3])}</td></tr>`;
+}).join('');
+
+  const currentSplit=splitFor(regular.length+family.length,other.length);
+  const out60=outstanding.filter(r=>r._potential===60).length,out30=outstanding.filter(r=>r._potential===30).length;
+  const exp60=expired.filter(r=>r._potential===60).length,exp30=expired.filter(r=>r._potential===30).length;
+  const outstandingSplit=splitFor(out60,out30);
+  const expiredSplit=splitFor(exp60,exp30);
+  const netActualSplit={members:currentSplit.members,gross:currentSplit.gross,squad:currentSplit.squad,district:currentSplit.district,national:currentSplit.national};
+  const allSplits=[currentSplit,outstandingSplit,expiredSplit];
+  const labels=['Current Revenue','Outstanding Potential','Expired Potential'];
+  $('splitBody').innerHTML=allSplits.map((s,i)=>`<tr><td>${labels[i]}</td><td class="num">${s.members.toLocaleString()}</td><td class="num">${money(s.gross)}</td><td class="num">${money(s.squad)}</td><td class="num">${money(s.district)}</td><td class="num">${money(s.national)}</td></tr>`).join('')+`<tr style="font-weight:bold;background:#eaf7ea;"><td>Net Actual Revenue</td><td class="num">${netActualSplit.members.toLocaleString()}</td><td class="num">${money(netActualSplit.gross)}</td><td class="num">${money(netActualSplit.squad)}</td><td class="num">${money(netActualSplit.district)}</td><td class="num">${money(netActualSplit.national)}</td></tr>`;
+  $('splitMembers').textContent=allSplits.reduce((a,b)=>a+b.members,0).toLocaleString();
+  $('splitGross').textContent=money(allSplits.reduce((a,b)=>a+b.gross,0));
+  $('splitSquadron').textContent=money(allSplits.reduce((a,b)=>a+b.squad,0));
+  $('splitDistrict').textContent=money(allSplits.reduce((a,b)=>a+b.district,0));
+  $('splitNational').textContent=money(allSplits.reduce((a,b)=>a+b.national,0));
+
+  renderCategory('regular',regular);
+  renderCategory('familyHead',family);
+  renderCategory('other',other);
+  renderCategory('outstanding',outstanding);
+  renderCategory('expired',expired);
+  renderCategory('life',life);
+  renderCategory('excluded',excluded);
+  renderOrgSummaries();
+
+  $('resultsPanel').classList.remove('hidden');
+  await renderCharts(
+    ['Current Regular','Family_Head','Other','Outstanding','Expired','Life','Excluded'],
+    [regular.length,family.length,other.length,outstanding.length,expired.length,life.length,excluded.length],
+    ['Current Revenue','Outstanding Potential','Expired Potential'],
+    [currentRevenue,outstandingPotential,expiredPotential]
+  );
+}
+function excelRows(rows){
+  return rows.map(r=>{
+    const o={};sourceHeaders.forEach(h=>o[h]=r[h]);
+    o['Calculated Category']=r._category;
+    o['Status']=r._status;
+    o['Days Overdue']=r._daysOverdue;
+    o['Rate']=r._rate;
+    o['Current Revenue']=r._revenue;
+    o['Potential Revenue']=r._potential;
+    return o;
+  });
+}
+function setCurrency(ws,cols,start,end){cols.forEach(c=>{for(let r=start;r<=end;r++){if(ws[c+r])ws[c+r].z='$#,##0.00'}})}
+async function saveExcel(){
+  try{
+    $('status').textContent='Creating Excel workbook...';
+    await loadSheetJS();
+
+    const regular=processedRows.filter(r=>r._category==='Current Regular');
+    const family=processedRows.filter(r=>r._category==='Current Family Head');
+    const other=processedRows.filter(r=>r._category==='Current Other');
+    const outstanding=processedRows.filter(r=>r._category==='Outstanding');
+    const expired=processedRows.filter(r=>r._category==='Expired');
+    const life=processedRows.filter(r=>r._category==='Regular Life');
+    const excluded=processedRows.filter(r=>r._category==='Excluded');
+    const total=processedRows.length;
+    const activeMembers=processedRows.filter(r=>{
+      const mt=normalize(r[sourceHeaders.find(h=>normalize(h)==='membership type')]);
+      const dateHeader=sourceHeaders.find(h=>normalize(h)==='next payment date');
+      const d=parseDateValue(r[dateHeader]);
+      const now=new Date();
+      const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+      return (mt==='regular'||mt==='regular life'||mt==='life member') && d && d>=today;
+    });
+    const currentRevenue=[...regular,...family,...other].reduce((s,r)=>s+r._revenue,0);
+    const outstandingPotential=outstanding.reduce((s,r)=>s+r._potential,0);
+    const expiredPotential=expired.reduce((s,r)=>s+r._potential,0);
+    const totalPotential=currentRevenue+outstandingPotential+expiredPotential;
+    const netActualRevenue=currentRevenue;
+
+    const wb=XLSX.utils.book_new();
+    const summaryAOA=[
+      ['CanBoat / NautiSavoir Membership Financial Summary'],
+      ['Prepared',new Date().toLocaleString('en-CA')],
+      ['Copyright','© 2026 Glen Carruthers. All Rights Reserved.'],
+      [],
+      ['Category','Member Count','% of Total','Current Revenue','Potential Revenue'],
+      ['Active Members',activeMembers.length,total?activeMembers.length/total:0,currentRevenue,0],
+      ['Current Regular',regular.length,total?regular.length/total:0,regular.reduce((s,r)=>s+r._revenue,0),0],
+      ['Current Family_Head',family.length,total?family.length/total:0,family.reduce((s,r)=>s+r._revenue,0),0],
+      ['Current Other',other.length,total?other.length/total:0,other.reduce((s,r)=>s+r._revenue,0),0],
+      ['Outstanding 1-30 Days',outstanding.length,total?outstanding.length/total:0,0,outstandingPotential],
+      ['Expired 31+ Days',expired.length,total?expired.length/total:0,0,expiredPotential],
+      ['Regular Life',life.length,total?life.length/total:0,0,0],
+      ['Excluded',excluded.length,total?excluded.length/total:0,0,0],
+      ['TOTAL',{f:'SUM(B7:B13)'},1,{f:'SUM(D7:D13)'},{f:'SUM(E7:E13)'}],
+      [],
+      ['Net Actual Revenue','','','',netActualRevenue]
+    ];
+    const wsSummary=XLSX.utils.aoa_to_sheet(summaryAOA);
+    wsSummary['!merges']=[XLSX.utils.decode_range('A1:E1')];
+    wsSummary['!cols']=[{wch:34},{wch:15},{wch:14},{wch:18},{wch:18}];
+    for(let r=6;r<=16;r++){if(wsSummary['C'+r])wsSummary['C'+r].z='0.00%'}
+    setCurrency(wsSummary,['D','E'],6,16);
+    XLSX.utils.book_append_sheet(wb,wsSummary,'Executive Summary');
+
+    const currentSplit=splitFor(regular.length+family.length,other.length);
+    const out60=outstanding.filter(r=>r._potential===60).length,out30=outstanding.filter(r=>r._potential===30).length;
+    const exp60=expired.filter(r=>r._potential===60).length,exp30=expired.filter(r=>r._potential===30).length;
+    const outSplit=splitFor(out60,out30),expSplit=splitFor(exp60,exp30);
+    const splitAOA=[
+      ['Revenue Type','Members','Gross Revenue','Squadron','District','National HQ'],
+      ['Current Revenue',currentSplit.members,currentSplit.gross,currentSplit.squad,currentSplit.district,currentSplit.national],
+      ['Outstanding Potential',outSplit.members,outSplit.gross,outSplit.squad,outSplit.district,outSplit.national],
+      ['Expired Potential',expSplit.members,expSplit.gross,expSplit.squad,expSplit.district,expSplit.national],
+      ['Net Actual Revenue',currentSplit.members,currentSplit.gross,currentSplit.squad,currentSplit.district,currentSplit.national],
+      ['TOTAL',{f:'SUM(B2:B4)'},{f:'SUM(C2:C4)'},{f:'SUM(D2:D4)'},{f:'SUM(E2:E4)'},{f:'SUM(F2:F4)'}]
+    ];
+    const wsSplit=XLSX.utils.aoa_to_sheet(splitAOA);
+    wsSplit['!cols']=[{wch:24},{wch:12},{wch:16},{wch:14},{wch:14},{wch:16}];
+    setCurrency(wsSplit,['C','D','E','F'],2,6);
+    XLSX.utils.book_append_sheet(wb,wsSplit,'Revenue Distribution');
+
+
+    const org=buildOrgSummaries();
+
+    const districtAOA=[[
+      'District','Active Members','Current Members','Outstanding','Expired','Regular Life',
+      'Current Revenue','Outstanding Potential','Expired Potential',
+      'Squadron Share','District Share','National HQ Share'
+    ]];
+    org.districts.forEach(s=>districtAOA.push([
+      s.name,s.active,s.current,s.outstanding,s.expired,s.life,
+      s.currentRevenue,s.outstandingPotential,s.expiredPotential,
+      s.squadronShare,s.districtShare,s.nationalShare
+    ]));
+    const wsDistrict=XLSX.utils.aoa_to_sheet(districtAOA);
+    wsDistrict['!autofilter']={ref:wsDistrict['!ref']||'A1:A1'};
+    wsDistrict['!cols']=[{wch:24},{wch:14},{wch:14},{wch:12},{wch:12},{wch:13},{wch:16},{wch:18},{wch:16},{wch:15},{wch:14},{wch:17}];
+    setCurrency(wsDistrict,['G','H','I','J','K','L'],2,districtAOA.length);
+    XLSX.utils.book_append_sheet(wb,wsDistrict,'District Summary');
+
+    const squadronAOA=[[
+      'District','Squadron','Active Members','Current Members','Outstanding','Expired','Regular Life',
+      'Current Revenue','Outstanding Potential','Expired Potential',
+      'Squadron Share','District Share','National HQ Share'
+    ]];
+    org.squadrons.forEach(s=>squadronAOA.push([
+      s.district,s.name,s.active,s.current,s.outstanding,s.expired,s.life,
+      s.currentRevenue,s.outstandingPotential,s.expiredPotential,
+      s.squadronShare,s.districtShare,s.nationalShare
+    ]));
+    const wsSquadron=XLSX.utils.aoa_to_sheet(squadronAOA);
+    wsSquadron['!autofilter']={ref:wsSquadron['!ref']||'A1:A1'};
+    wsSquadron['!cols']=[{wch:22},{wch:24},{wch:14},{wch:14},{wch:12},{wch:12},{wch:13},{wch:16},{wch:18},{wch:16},{wch:15},{wch:14},{wch:17}];
+    setCurrency(wsSquadron,['H','I','J','K','L','M'],2,squadronAOA.length);
+    XLSX.utils.book_append_sheet(wb,wsSquadron,'Squadron Summary');
+
+    const sheets=[
+      ['Current Regular',regular],['Current Family Head',family],['Current Other',other],
+      ['Outstanding',outstanding],['Expired',expired],['Regular Life',life],['Excluded',excluded]
+    ];
+    sheets.forEach(([name,rows])=>{
+      const ws=XLSX.utils.json_to_sheet(excelRows(rows));
+      ws['!autofilter']={ref:ws['!ref']||'A1:A1'};
+      ws['!cols']=[...sourceHeaders.map(h=>({wch:Math.min(Math.max(h.length+2,12),28)})),{wch:23},{wch:14},{wch:14},{wch:12},{wch:16},{wch:18}];
+      const base=sourceHeaders.length;
+      setCurrency(ws,[XLSX.utils.encode_col(base+3),XLSX.utils.encode_col(base+4),XLSX.utils.encode_col(base+5)],2,rows.length+1);
+      XLSX.utils.book_append_sheet(wb,ws,name.substring(0,31));
+    });
+
+    XLSX.writeFile(wb,'canboat-membership-financial-management-v3.4.xlsx');
+    $('status').textContent='Excel workbook saved successfully.';
+  }catch(err){$('status').innerHTML='<span class="warn">'+escapeHtml(err.message)+'</span>'}
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-page').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');$(btn.dataset.tab).classList.add('active');
+}));
+
+$('processBtn').addEventListener('click',async()=>{
+  const file=$('fileInput').files[0];
+  if(!file){$('status').innerHTML='<span class="warn">Please select a file first.</span>';return}
+  try{
+    $('processBtn').disabled=true;$('status').textContent='Reading and processing file...';
+    sourceRows=await readFile(file);
+    if(!sourceRows.length)throw new Error('No records were found in the file.');
+    sourceHeaders=Object.keys(sourceRows[0]).map(cleanHeader);
+    const mh=findHeader(sourceHeaders,'Membership Type');
+    const fh=findHeader(sourceHeaders,'Family Role');
+    const dh=findHeader(sourceHeaders,'Next Payment Date');
+    if(!mh||!fh||!dh)throw new Error('The file must contain Membership Type, Family Role, and Next Payment Date columns.');
+    processedRows=sourceRows.map(row=>{
+      const c=classify(row,mh,fh,dh);
+      return {...row,_category:c.category,_status:c.status,_daysOverdue:c.daysOverdue,_rate:c.rate,_revenue:c.revenue,_potential:c.potential};
+    });
+    await renderAll();
+    $('excelBtn').disabled=false;$('printBtn').disabled=false;
+    $('status').textContent=`Completed: ${processedRows.length.toLocaleString()} records processed from ${file.name}.`;
+  }catch(err){$('status').innerHTML='<span class="warn">'+escapeHtml(err.message)+'</span>'}
+  finally{$('processBtn').disabled=false}
+});
+$('excelBtn').addEventListener('click',saveExcel);
+$('printBtn').addEventListener('click',()=>window.print());
+$('resetBtn').addEventListener('click',()=>{
+  $('fileInput').value='';sourceRows=[];sourceHeaders=[];processedRows=[];
+  $('resultsPanel').classList.add('hidden');$('excelBtn').disabled=true;$('printBtn').disabled=true;
+  $('status').textContent='Select a CSV or Excel membership file.';
+  if(memberChart){memberChart.destroy();memberChart=null}
+  if(revenueChart){revenueChart.destroy();revenueChart=null}
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab==='summaryTab'));
+  document.querySelectorAll('.tab-page').forEach(p=>p.classList.toggle('active',p.id==='summaryTab'));
+});
+</script>
+</body>
+</html>
